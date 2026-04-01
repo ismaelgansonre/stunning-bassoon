@@ -1,14 +1,20 @@
 {
-  "name": "directus-interface-editorjs",
+  "name": "@interface/directus-interface-editorjs",
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "directus:extension": {
+    "type": "interface",
+    "host": "app",
+    "path": "dist/index.js",
+    "source": "src/index.ts"
+  },
   "scripts": {
     "build": "directus-extension build"
   },
   "dependencies": {
     "@editorjs/editorjs": "^2.30.0",
-    "@editorjs/code": "^2.10.0",
+    "@editorjs/code": "^2.9.4",
     "@editorjs/header": "^2.8.8",
     "@editorjs/image": "^2.9.0",
     "@editorjs/list": "^2.0.0",
