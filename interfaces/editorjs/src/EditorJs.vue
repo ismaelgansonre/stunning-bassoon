@@ -4,17 +4,21 @@
       <button
         type="button"
         class="editorjs-toggle"
-        :class="{ active: showPreview }"
-        @click="showPreview = !showPreview"
+        :class="{ active: isEditMode }"
+        @click="toggleMode"
       >
-        {{ showPreview ? 'Hide Preview' : 'Show Preview' }}
+        {{ isEditMode ? '✏️ Edit Mode' : '👁️ View Mode' }}
       </button>
     </div>
 
-    <div class="editorjs-grid" :class="{ split: showPreview }">
+    <!-- Edit Mode -->
+    <div v-if="isEditMode" class="editorjs-container">
       <div ref="holder" class="editorjs-holder"></div>
+    </div>
 
-      <div v-if="showPreview" class="editorjs-preview" v-html="previewHtml"></div>
+    <!-- View Mode (Read-Only) -->
+    <div v-else class="editorjs-container">
+      <div ref="viewerHolder" class="editorjs-viewer"></div>
     </div>
   </div>
 </template>
@@ -35,13 +39,13 @@ const props = defineProps<{ modelValue?: OutputData | string | null; readOnly?: 
 const emit = defineEmits<{ (e: 'update:modelValue', value: OutputData | null): void }>();
 
 const holder = ref<HTMLDivElement | null>(null);
+const viewerHolder = ref<HTMLDivElement | null>(null);
 let editor: EditorJS | null = null;
+let viewerEditor: EditorJS | null = null;
 let ready = false;
 let lastSaved: string | null = null;
-const showPreview = ref(true);
-const previewHtml = ref('');
+const isEditMode = ref(true);
 const api = useApi();
-const parser = edjsHTML();
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null;
 
 const getBaseUrl = () => {
@@ -49,17 +53,38 @@ const getBaseUrl = () => {
   return base.replace(/\/$/, '');
 };
 
-const updatePreview = (data: OutputData | undefined) => {
-  if (!data) {
-    previewHtml.value = '';
-    return;
-  }
-  try {
-    const chunks = parser.parse(data) as string[];
-    previewHtml.value = chunks.join('');
-  } catch {
-    previewHtml.value = '';
-  }
+// Custom heading renderer
+const customHeadingRenderer = (block: any) => {
+  const { level, text } = block.data;
+  const tag = `h${level}`;
+  return `<${tag}>${text}</${tag}>`;
+};
+
+// Custom parser with heading fix
+const getParser = () => {
+  const parser = edjsHTML({
+    paragraph: (block: any) => `<p>${block.data.text}</p>`,
+    heading: customHeadingRenderer,
+    image: (block: any) => {
+      const { url, caption } = block.data.file || block.data;
+      return `<figure><img src="${url}" alt="${caption || ''}" />${caption ? `<figcaption>${caption}</figcaption>` : ''}</figure>`;
+    },
+    list: (block: any) => {
+      const { items, style } = block.data;
+      const tag = style === 'unordered' ? 'ul' : 'ol';
+      const itemsHTML = items.map((item: string) => `<li>${item}</li>`).join('');
+      return `<${tag}>${itemsHTML}</${tag}>`;
+    },
+    quote: (block: any) => {
+      const { text, caption } = block.data;
+      return `<blockquote><p>${text}</p>${caption ? `<footer>${caption}</footer>` : ''}</blockquote>`;
+    },
+    code: (block: any) => {
+      const { code } = block.data;
+      return `<pre><code>${code}</code></pre>`;
+    },
+  });
+  return parser;
 };
 
 const parseValue = (value: OutputData | string | null | undefined): OutputData | undefined => {
@@ -74,14 +99,55 @@ const parseValue = (value: OutputData | string | null | undefined): OutputData |
   return value;
 };
 
+const toggleMode = async () => {
+  if (isEditMode.value && editor) {
+    // Switch to view mode: save editor data
+    const data = await editor.save();
+    isEditMode.value = false;
+    await initViewerEditor(data);
+  } else {
+    // Switch to edit mode
+    if (viewerEditor) {
+      await viewerEditor.destroy();
+      viewerEditor = null;
+    }
+    isEditMode.value = true;
+  }
+};
+
+const initViewerEditor = async (data: OutputData) => {
+  if (!viewerHolder.value) return;
+
+  if (viewerEditor) {
+    await viewerEditor.destroy();
+  }
+
+  viewerEditor = new EditorJS({
+    holder: viewerHolder.value,
+    readOnly: true,
+    data,
+    tools: {
+      header: Header,
+      image: ImageTool,
+      list: List,
+      quote: Quote,
+      code: Code,
+    },
+  });
+
+  await viewerEditor.isReady;
+};
+
 onMounted(async () => {
   if (!holder.value) return;
+
+  const parsedData = parseValue(props.modelValue);
 
   editor = new EditorJS({
     holder: holder.value,
     readOnly: !!props.readOnly,
     autofocus: true,
-    data: parseValue(props.modelValue),
+    data: parsedData,
     tools: {
       header: {
         class: Header,
@@ -143,13 +209,11 @@ onMounted(async () => {
       const serialized = JSON.stringify(data);
       if (serialized === lastSaved) return;
       lastSaved = serialized;
-      updatePreview(data);
       emit('update:modelValue', data);
     },
   });
 
   await editor.isReady;
-  updatePreview(parseValue(props.modelValue));
   ready = true;
 
   pasteHandler = async (event: ClipboardEvent) => {
@@ -195,10 +259,8 @@ watch(
 
     if (parsed) {
       await editor.render(parsed);
-      updatePreview(parsed);
     } else {
       await editor.clear();
-      updatePreview(undefined);
     }
   }
 );
@@ -212,54 +274,166 @@ onBeforeUnmount(async () => {
     await editor.destroy();
     editor = null;
   }
+  if (viewerEditor) {
+    await viewerEditor.destroy();
+    viewerEditor = null;
+  }
 });
 </script>
 
 <style scoped>
 .editorjs-wrapper {
-  min-height: 200px;
+  min-height: 400px;
 }
 
 .editorjs-toolbar {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .editorjs-toggle {
   border: 1px solid var(--theme--border-color, #2a2a2a);
   background: var(--theme--background-normal, #151515);
   color: var(--theme--foreground, #ffffff);
-  padding: 6px 10px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.editorjs-toggle:hover {
+  border-color: var(--theme--primary, #3b82f6);
+  background: var(--theme--background-subdued, #1a1a1a);
 }
 
 .editorjs-toggle.active {
   border-color: var(--theme--primary, #3b82f6);
-  color: var(--theme--primary, #3b82f6);
+  background: var(--theme--primary, #3b82f6);
+  color: white;
 }
 
-.editorjs-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
+.editorjs-container {
+  width: 100%;
+  min-height: 300px;
 }
 
-.editorjs-grid.split {
-  grid-template-columns: 1fr 1fr;
-}
-
-.editorjs-preview {
+.editorjs-holder {
   border: 1px solid var(--theme--border-color, #2a2a2a);
-  background: var(--theme--background-subdued, #101010);
+  background: var(--theme--background-normal, #151515);
   padding: 16px;
-  overflow: auto;
+  border-radius: 4px;
+  min-height: 300px;
 }
 
+.editorjs-viewer {
+  border: 1px solid var(--theme--border-color, #2a2a2a);
+  background: var(--theme--background-normal, #151515);
+  padding: 24px;
+  border-radius: 4px;
+  min-height: 300px;
+  line-height: 1.6;
+}
+
+/* Editor.js styles */
 .editorjs-holder :deep(.ce-block__content),
 .editorjs-holder :deep(.ce-toolbar__content) {
   max-width: 100%;
+}
+
+/* Heading styles in viewer */
+.editorjs-viewer :deep(h1) {
+  font-size: 2em;
+  font-weight: 700;
+  margin: 0.67em 0;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(h2) {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 0.75em 0;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(h3) {
+  font-size: 1.17em;
+  font-weight: 700;
+  margin: 0.83em 0;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(h4) {
+  font-size: 1em;
+  font-weight: 700;
+  margin: 1em 0;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(p) {
+  margin: 1em 0;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(ul),
+.editorjs-viewer :deep(ol) {
+  margin: 1em 0;
+  padding-left: 2em;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(li) {
+  margin: 0.5em 0;
+}
+
+.editorjs-viewer :deep(blockquote) {
+  border-left: 4px solid var(--theme--primary, #3b82f6);
+  padding-left: 16px;
+  margin: 1em 0;
+  font-style: italic;
+  color: var(--theme--foreground-subdued, #a0a0a0);
+}
+
+.editorjs-viewer :deep(blockquote footer) {
+  font-size: 0.9em;
+  margin-top: 0.5em;
+  color: var(--theme--foreground-subdued, #a0a0a0);
+  font-style: normal;
+}
+
+.editorjs-viewer :deep(pre) {
+  background: var(--theme--background-subdued, #101010);
+  border: 1px solid var(--theme--border-color, #2a2a2a);
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.editorjs-viewer :deep(code) {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  color: var(--theme--foreground, #ffffff);
+}
+
+.editorjs-viewer :deep(figure) {
+  margin: 1.5em 0;
+  text-align: center;
+}
+
+.editorjs-viewer :deep(figure img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid var(--theme--border-color, #2a2a2a);
+}
+
+.editorjs-viewer :deep(figcaption) {
+  font-size: 0.9em;
+  color: var(--theme--foreground-subdued, #a0a0a0);
+  margin-top: 8px;
+  font-style: italic;
 }
 </style>
