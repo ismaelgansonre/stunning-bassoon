@@ -38,6 +38,9 @@ import useFileHandler from './use-filehandler';
 import getTools from './get-tools';
 import getTranslations from './translations';
 import { wait } from './wait';
+import './editorjs-ui.css';
+import './editorjs-components.css';
+import './editorjs-content-reset.css';
 
 const props = withDefaults(
 	defineProps<{
@@ -236,7 +239,3 @@ function getSanitizedValue(value: any): EditorJS.OutputData | null {
 	object-fit: contain;
 }
 </style>
-
-<style src="./editorjs-ui.css"></style>
-<style src="./editorjs-components.css"></style>
-<style src="./editorjs-content-reset.css"></style>
