@@ -14,6 +14,7 @@ export default class extends AttachesTool {
 			config: this.config,
 			onUpload: (response) => this.onUpload(response),
 			onError: (error) => this.uploadingFailed(error),
+			api: this.config.uploader.api, // Pass Axios instance
 		});
 
 		// Until get https://github.com/editor-js/attaches/issues/50 solved, this is required.

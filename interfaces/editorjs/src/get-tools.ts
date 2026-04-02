@@ -28,6 +28,7 @@ export type UploaderConfig = {
 	setCurrentPreview?: (url: string) => void;
 	getUploadFieldElement: () => any;
 	getToken: () => string | null;
+	api?: any; // Axios instance for authenticated uploads
 	folder?: string;
 	t: Record<string, string>;
 };

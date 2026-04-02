@@ -14,6 +14,7 @@ export default class extends ImageTool {
 			getCurrentFile: () => this.data?.file?.url,
 			onUpload: (response) => this.onUpload(response),
 			onError: (error) => this.uploadingFailed(error),
+			api: this.config.uploader.api, // Pass Axios instance
 		});
 	}
 

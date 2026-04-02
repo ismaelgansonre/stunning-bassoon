@@ -89,6 +89,7 @@ const tools = getTools(
 		setCurrentPreview,
 		getUploadFieldElement: () => uploaderComponentElement,
 		getToken,
+		api, // Pass Axios instance
 		folder: props.folder,
 		t: {
 			no_file_selected: t('no_file_selected'),

@@ -18,6 +18,7 @@ export default class extends Personality {
 			getCurrentFile: () => this.data.photo,
 			onUpload: (response) => this.onUpload({ body: response }),
 			onError: (error) => this.uploadingFailed(error),
+			api: this.config.uploader.api, // Pass Axios instance
 		});
 
 		// Until get https://github.com/editor-js/attaches/issues/50 solved, this is required.

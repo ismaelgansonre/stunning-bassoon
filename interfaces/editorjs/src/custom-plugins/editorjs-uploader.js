@@ -2,11 +2,12 @@
  * Modified version of https://github.com/editor-js/image/blob/master/src/uploader.js
  */
 export default class Uploader {
-	constructor({ config, getCurrentFile, onUpload, onError }) {
+	constructor({ config, getCurrentFile, onUpload, onError, api }) {
 		this.getCurrentFile = getCurrentFile;
 		this.config = config;
 		this.onUpload = onUpload;
 		this.onError = onError;
+		this.api = api; // Axios instance
 	}
 
 	uploadByFile(file, { onPreview }) {
@@ -15,7 +16,7 @@ export default class Uploader {
 	}
 
 	uploadFileDirectly(file, { onPreview }) {
-		// Create FormData and upload directly to Directus
+		// Create FormData and upload directly to Directus using Axios
 		const formData = new FormData();
 		formData.append('file', file);
 
@@ -25,29 +26,20 @@ export default class Uploader {
 
 		onPreview();
 
-		const token = this.config.uploader.getToken();
-		const headers = {
-			Authorization: 'Bearer ' + token,
-		};
-
-		fetch(this.config.uploader.baseURL + 'files', {
-			method: 'POST',
-			headers,
-			body: formData,
-		})
-			.then((response) => {
-				if (!response.ok) {
-					throw new Error(`Upload failed: ${response.statusText}`);
-				}
-				return response.json();
+		// Use Axios API for authenticated upload
+		this.api
+			.post('files', formData, {
+				headers: {
+					'Content-Type': 'multipart/form-data',
+				},
 			})
-			.then((data) => {
-				if (!data.data) {
+			.then((response) => {
+				if (!response.data?.data) {
 					throw new Error('No file data returned');
 				}
 
-				const fileData = data.data;
-				const response = {
+				const fileData = response.data.data;
+				const responseData = {
 					success: 1,
 					file: {
 						width: fileData.width,
@@ -62,14 +54,18 @@ export default class Uploader {
 					},
 				};
 
-				onPreview(this.config.uploader.addTokenToURL(response.file.url) + '&key=system-large-contain');
-				this.onUpload(response);
+				onPreview(
+					this.config.uploader.addTokenToURL(responseData.file.url) + '&key=system-large-contain'
+				);
+				this.onUpload(responseData);
 			})
 			.catch((error) => {
-				window.console.error('editorjs-interface: Upload failed - %s', error);
+				const errorMessage =
+					error.response?.data?.errors?.[0]?.message || error.message || 'Unknown error';
+				window.console.error('editorjs-interface: Upload failed - %s', errorMessage);
 				this.onError({
 					success: 0,
-					message: 'Upload failed: ' + error.message,
+					message: 'Upload failed: ' + errorMessage,
 				});
 			});
 	}
