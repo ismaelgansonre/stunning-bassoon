@@ -10,25 +10,68 @@ export default class Uploader {
 	}
 
 	uploadByFile(file, { onPreview }) {
-		// Right now the only option is to open the picker.
-		this.uploadSelectedFile({ onPreview });
+		// Upload file directly via Directus API
+		this.uploadFileDirectly(file, { onPreview });
+	}
+
+	uploadFileDirectly(file, { onPreview }) {
+		// Create FormData and upload directly to Directus
+		const formData = new FormData();
+		formData.append('file', file);
+
+		if (this.config.uploader.folder) {
+			formData.append('folder', this.config.uploader.folder);
+		}
 
 		onPreview();
 
-		// @TODO Very ugly, but until found better way.
-		setTimeout(() => {
-			if (!this.config.uploader.getUploadFieldElement) return;
+		const token = this.config.uploader.getToken();
+		const headers = {
+			Authorization: 'Bearer ' + token,
+		};
 
-			try {
-				this.config.uploader.getUploadFieldElement().onBrowseSelect({
-					target: {
-						files: [file],
+		fetch(this.config.uploader.baseURL + 'files', {
+			method: 'POST',
+			headers,
+			body: formData,
+		})
+			.then((response) => {
+				if (!response.ok) {
+					throw new Error(`Upload failed: ${response.statusText}`);
+				}
+				return response.json();
+			})
+			.then((data) => {
+				if (!data.data) {
+					throw new Error('No file data returned');
+				}
+
+				const fileData = data.data;
+				const response = {
+					success: 1,
+					file: {
+						width: fileData.width,
+						height: fileData.height,
+						size: fileData.filesize,
+						name: fileData.filename_download,
+						title: fileData.title || fileData.filename_download,
+						extension: fileData.filename_download.split('.').pop(),
+						fileId: fileData.id,
+						fileURL: this.config.uploader.baseURL + 'files/' + fileData.id,
+						url: this.config.uploader.baseURL + 'assets/' + fileData.id,
 					},
+				};
+
+				onPreview(this.config.uploader.addTokenToURL(response.file.url) + '&key=system-large-contain');
+				this.onUpload(response);
+			})
+			.catch((error) => {
+				window.console.error('editorjs-interface: Upload failed - %s', error);
+				this.onError({
+					success: 0,
+					message: 'Upload failed: ' + error.message,
 				});
-			} catch (error) {
-				window.console.warn('editorjs-interface: Cannot get browsing component - %s', error);
-			}
-		}, 500);
+			});
 	}
 
 	uploadByUrl(url) {

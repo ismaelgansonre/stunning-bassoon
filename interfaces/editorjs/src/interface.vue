@@ -69,7 +69,7 @@ const emit = defineEmits(['input']);
 
 const { t } = useI18n();
 const api = useApi();
-const { addTokenToURL } = useDirectusToken(api);
+const { addTokenToURL, getToken } = useDirectusToken(api);
 const { useCollectionsStore } = useStores();
 const collectionStore = useCollectionsStore();
 const { currentPreview, setCurrentPreview, fileHandler, setFileHandler, unsetFileHandler, handleFile } =
@@ -88,6 +88,8 @@ const tools = getTools(
 		setFileHandler,
 		setCurrentPreview,
 		getUploadFieldElement: () => uploaderComponentElement,
+		getToken,
+		folder: props.folder,
 		t: {
 			no_file_selected: t('no_file_selected'),
 		},

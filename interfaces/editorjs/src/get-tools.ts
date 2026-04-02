@@ -22,11 +22,13 @@ import AttachesTool from './custom-plugins/plugin-attaches-patch.js';
 import PersonalityTool from './custom-plugins/plugin-personality-patch.js';
 
 export type UploaderConfig = {
-	addTokenToURL: (url: string, token: string) => string;
+	addTokenToURL: (url: string, token?: string) => string;
 	baseURL: string | undefined;
 	setFileHandler: (handler: any) => void;
 	setCurrentPreview?: (url: string) => void;
 	getUploadFieldElement: () => any;
+	getToken: () => string | null;
+	folder?: string;
 	t: Record<string, string>;
 };
 
