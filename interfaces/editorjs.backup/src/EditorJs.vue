@@ -89,59 +89,129 @@ const getParser = () => {
 
 const parseValue = (value: OutputData | string | null | undefined): OutputData | undefined => {
   if (!value) return undefined;
+  
+  let parsed: any = value;
+  
+  // Si c'est une string, parser en JSON
   if (typeof value === 'string') {
     try {
-      return JSON.parse(value) as OutputData;
+      parsed = JSON.parse(value);
     } catch {
       return undefined;
     }
   }
-  return value;
+  
+  // Valider qu'on a une structure Editor.js valide
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  if (!Array.isArray(parsed.blocks) || parsed.blocks.length === 0) {
+    return undefined;
+  }
+  
+  // Filter out invalid blocks mais garder la structure complète
+  const validBlocks = parsed.blocks.filter((block: any) => {
+    if (!block || typeof block !== 'object' || !block.type || !block.data) {
+      console.warn('❌ Block missing required fields:', block);
+      return false;
+    }
+    
+    // Juste vérifier que le block a un type et data, pas plus strict
+    return true;
+  }).map((block: any) => {
+    // IMPORTANT: Enlever les IDs générés par Editor.js (c'est pas du contenu à persister)
+    const { id, ...blockWithoutId } = block;
+    return blockWithoutId;
+  });
+  
+  if (validBlocks.length === 0) {
+    console.warn('⚠️ All blocks were invalid');
+    return undefined;
+  }
+  
+  const result = {
+    version: parsed.version || 2.31,
+    blocks: validBlocks,
+    // N'inclure time que si c'était déjà présent (pour les données historiques)
+    ...(parsed.time && { time: parsed.time }),
+  };
+  
+  console.log('✔️ Cleaned value (will send to Directus):', JSON.stringify(result, null, 2));
+  return result as OutputData;
 };
 
 const toggleMode = async () => {
-  if (isEditMode.value && editor) {
-    // Switch to view mode: save editor data
-    const data = await editor.save();
-    isEditMode.value = false;
-    await initViewerEditor(data);
-  } else {
-    // Switch to edit mode
-    if (viewerEditor) {
-      await viewerEditor.destroy();
-      viewerEditor = null;
+  try {
+    if (isEditMode.value && editor) {
+      // Save and switch to view mode
+      const data = await editor.save();
+      const validated = parseValue(data);
+      
+      if (!validated) {
+        console.error('Failed to save: invalid editor data', data);
+        return;
+      }
+      
+      // Emit the validated data before switching mode
+      const serialized = JSON.stringify(validated);
+      lastSaved = serialized;
+      emit('update:modelValue', validated);
+      
+      isEditMode.value = false;
+      
+      // Initialize viewer after mode switch
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await initViewerEditor(validated);
+    } else {
+      // Switch back to edit mode
+      if (viewerEditor) {
+        await viewerEditor.destroy();
+        viewerEditor = null;
+      }
+      isEditMode.value = true;
     }
-    isEditMode.value = true;
+  } catch (error) {
+    console.error('Mode toggle error:', error);
   }
 };
 
 const initViewerEditor = async (data: OutputData) => {
-  if (!viewerHolder.value) return;
+  if (!viewerHolder.value) {
+    console.warn('Viewer holder not available');
+    return;
+  }
 
   if (viewerEditor) {
     await viewerEditor.destroy();
   }
 
-  viewerEditor = new EditorJS({
-    holder: viewerHolder.value,
-    readOnly: true,
-    data,
-    tools: {
-      header: Header,
-      image: ImageTool,
-      list: List,
-      quote: Quote,
-      code: Code,
-    },
-  });
+  try {
+    viewerEditor = new EditorJS({
+      holder: viewerHolder.value,
+      readOnly: true,
+      data,
+      tools: {
+        header: Header,
+        image: ImageTool,
+        list: List,
+        quote: Quote,
+        code: Code,
+      },
+    });
 
-  await viewerEditor.isReady;
+    await viewerEditor.isReady;
+    console.log('Viewer initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize viewer:', error);
+  }
 };
 
 onMounted(async () => {
-  if (!holder.value) return;
+  if (!holder.value) {
+    console.error('❌ Holder element not found');
+    return;
+  }
 
   const parsedData = parseValue(props.modelValue);
+  console.log('🚀 Mounting Editor.js with data:', parsedData);
 
   editor = new EditorJS({
     holder: holder.value,
@@ -205,16 +275,35 @@ onMounted(async () => {
     },
     onChange: async () => {
       if (!editor) return;
-      const data = await editor.save();
-      const serialized = JSON.stringify(data);
-      if (serialized === lastSaved) return;
-      lastSaved = serialized;
-      emit('update:modelValue', data);
+      try {
+        const data = await editor.save();
+        console.log('Editor changed, data:', data);
+        
+        // Valider que les données après save sont correctes
+        const validated = parseValue(data);
+        if (!validated) {
+          console.warn('⚠️ Editor.js saved but validation failed:', data);
+          return;
+        }
+        
+        const serialized = JSON.stringify(validated);
+        if (serialized === lastSaved) {
+          console.log('✓ Data unchanged, skipping emit');
+          return;
+        }
+        
+        console.log('💾 Emitting validated data:', validated);
+        lastSaved = serialized;
+        emit('update:modelValue', validated);
+      } catch (error) {
+        console.error('❌ Error in onChange:', error);
+      }
     },
   });
 
   await editor.isReady;
   ready = true;
+  console.log('✅ Editor.js ready and mounted');
 
   pasteHandler = async (event: ClipboardEvent) => {
     if (!editor || !ready) return;
@@ -227,6 +316,7 @@ onMounted(async () => {
     if (!file) return;
 
     try {
+      console.log('📸 Image pasted, uploading:', file.name);
       const formData = new FormData();
       formData.append('file', file);
 
@@ -237,12 +327,16 @@ onMounted(async () => {
       });
 
       const id = response?.data?.data?.id;
-      if (!id) return;
+      if (!id) {
+        console.warn('❌ File upload returned no ID');
+        return;
+      }
 
       const url = `${getBaseUrl()}/assets/${id}`;
+      console.log('✅ Image uploaded:', url);
       await editor.blocks.insert('image', { file: { url } }, {}, undefined, true);
-    } catch {
-      // Ignore paste failures to avoid breaking normal typing.
+    } catch (error) {
+      console.error('❌ Image upload failed:', error);
     }
   };
 
@@ -253,13 +347,20 @@ watch(
   () => props.modelValue,
   async (next) => {
     if (!editor || !ready) return;
+    console.log('👁️ Props modelValue changed:', next);
+    
     const parsed = parseValue(next);
     const serialized = parsed ? JSON.stringify(parsed) : null;
-    if (serialized && serialized === lastSaved) return;
+    if (serialized && serialized === lastSaved) {
+      console.log('✓ Props sync skipped (same data)');
+      return;
+    }
 
     if (parsed) {
+      console.log('🔄 Rendering new data in editor');
       await editor.render(parsed);
     } else {
+      console.log('🧹 Clearing editor');
       await editor.clear();
     }
   }
